@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<title>three.js webgl - loaders - NRRD loader</title>
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+
+		<style>
+			#inset {
+				width: 150px;
+				height: 150px;
+				background-color: transparent; /* or transparent; will show through only if renderer alpha: true */
+				border: none; /* or none; */
+				margin: 0;
+				padding: 0px;
+				position: absolute;
+				left: 20px;
+				bottom: 20px;
+				z-index: 100;
+			}
+		</style>
+
+
+	</head>
+
+	<body>			
+		<div id="info">
+		</div>
+		<div id="inset"></div>
+
+		<script src="js/three.js"></script>
+		<script src="js/controls/TrackballControls.js"></script>
+		<script src="js/Volume.js"></script>
+		<script src="js/VolumeSlice.js"></script>
+		<script src="js/loaders/NRRDLoader.js"></script>
+		<script src="js/loaders/VTKLoader.js"></script>
+		<script src="js/WebGL.js"></script>
+		<script src="js/libs/stats.min.js"></script>
+		<script src="js/libs/gunzip.min.js"></script>
+		<script src="js/libs/dat.gui.min.js"></script>
+
+
+
+		<script>
+			if ( WEBGL.isWebGLAvailable() === false ) {
+				document.body.appendChild( WEBGL.getWebGLErrorMessage() );
+			}
+			var mouse = new THREE.Vector2(), INTERSECTED;
+			var container,
+				stats,
+				camera,
+				controls,
+				scene,
+				renderer,
+				container2,
+				renderer2,
+				camera2,
+				axes2,
+				scene2,
+				sphereMesh,
+				Xsize,
+				Ysize,
+				Zsize;
+			init();
+			animate();
+
+			var flag = 0;
+
+			let str = `\nX,Y,Z,Page\n`;
+
+			var TS = new function () {
+				this.LTS=0;
+				this.UTS=40359;
+			}
+
+			var pageNumber = new function () {
+    				this.page = '1';
+			};
+
+			var Ball = new function () {
+				this.radius = 16;
+			}
+			
+			var arr;
+
+			function init() {
+
+				var obj = {
+					outputTable: function() {
+						let uri = 'data:text/csv;charset=utf-8,\ufeff' + encodeURIComponent(str);
+						let link = document.createElement("a");
+						link.href = uri;
+						link.download =  "table.csv";
+						document.body.appendChild(link);
+						link.click();
+						document.body.removeChild(link);
+  					}
+				};
+
+
+				
+
+				camera = new THREE.PerspectiveCamera( 60, window.innerWidth / window.innerHeight, 0.01, 1e10 );
+				camera.position.z = 600;
+				scene = new THREE.Scene();
+				scene.add( camera );
+				// light
+				var dirLight = new THREE.DirectionalLight( 0xffffff );
+				dirLight.position.set( 200, 200, 1000 ).normalize();
+				camera.add( dirLight );
+				camera.add( dirLight.target );
+				var loader = new THREE.NRRDLoader();
+				loader.load( "models/nrrd/test.nrrd", function ( volume ) {
+					var geometry,
+						material,
+						sliceZ,
+						sliceY,
+						sliceX;
+					//box helper to see the extend of the volume
+					var geometry = new THREE.BoxBufferGeometry( volume.xLength, volume.yLength, volume.zLength );
+					// var geometry = new THREE.BoxBufferGeometry( volume.RASDimensions[ 0 ], volume.RASDimensions[ 1 ], volume.RASDimensions[ 2 ] );
+
+					str = `${Math.round(volume.RASDimensions[ 0 ]) + ','}` + `${Math.round(volume.RASDimensions[ 1 ]) + ','}` + `${Math.round(volume.RASDimensions[ 2 ])}` + str;
+					Xsize = volume.RASDimensions[ 0 ];
+					Ysize = volume.RASDimensions[ 1 ];
+					Zsize = volume.RASDimensions[ 2 ];
+					
+					var material = new THREE.MeshBasicMaterial(  );
+					var cube = new THREE.Mesh( geometry, material );
+					cube.visible = false;
+					var box = new THREE.BoxHelper( cube );
+					scene.add( box );
+					box.applyMatrix( volume.matrix );
+					scene.add( cube );
+					//z plane
+					sliceZ = volume.extractSlice( 'z', Math.floor( volume.RASDimensions[ 2 ] / 4 ) );
+					scene.add( sliceZ.mesh );
+					//y plane
+					sliceY = volume.extractSlice( 'y', Math.floor( volume.RASDimensions[ 1 ] / 2 ) );
+					scene.add( sliceY.mesh );
+					//x plane
+					sliceX = volume.extractSlice( 'x', Math.floor( volume.RASDimensions[ 0 ] / 2 ) );
+					scene.add( sliceX.mesh );
+					gui.add( sliceX, "index", 0, volume.RASDimensions[ 0 ] - 1, 1 ).name( "indexX" ).onChange( function () {
+						sliceX.repaint.call( sliceX );
+					} );
+					gui.add( sliceY, "index", 0, volume.RASDimensions[ 1 ] - 1, 1 ).name( "indexY" ).onChange( function () {
+						sliceY.repaint.call( sliceY );
+					} );
+					gui.add( sliceZ, "index", 0, volume.RASDimensions[ 2 ] - 1, 1 ).name( "indexZ" ).onChange( function () {
+						sliceZ.repaint.call( sliceZ );
+					} );
+					gui.add( volume, "lowerThreshold", volume.min, volume.max, 1 ).name( "Lower Threshold" ).onChange( function () {
+						volume.repaintAllSlices();TS.LTS = volume.lowerThreshold;TS.UTS = volume.upperThreshold;
+					} );
+					gui.add( volume, "upperThreshold", volume.min, volume.max, 1 ).name( "Upper Threshold" ).onChange( function () {
+						volume.repaintAllSlices();TS.LTS = volume.lowerThreshold;TS.UTS = volume.upperThreshold;
+					} );
+					gui.add( volume, "windowLow", volume.min, volume.max, 1 ).name( "Window Low" ).onChange( function () {
+						volume.repaintAllSlices();
+					} );
+					gui.add( volume, "windowHigh", volume.min, volume.max, 1 ).name( "Window High" ).onChange( function () {
+						volume.repaintAllSlices();
+					} );
+					gui.add( controls, 'rotateSpeed', { Yes: 5.0, No: 0}).name( "Rotate" );		
+					gui.add( pageNumber, 'page').name( "Page" );
+					gui.add( obj, "outputTable" ).name( "Output the Table" );
+					gui.add( Ball, "radius", 0, 50, 1 ).name( "Radius" ).onChange( function () {
+						flag = 0;
+						var sphereGeo1 = new THREE.SphereGeometry(Ball.radius, 40, 40);
+						sphereMesh = new THREE.Mesh(sphereGeo1, sphereMat);
+						scene.add(sphereMesh);
+					});
+					// console.log((volume.data).length);
+					// console.log(volume);
+					// console.log(Xsize,Ysize,Zsize);
+
+					arr = new Array();
+					for (var i = 0; i < Zsize; i++) {
+						arr[i] = new Array();
+						for (var j = 0; j < Ysize; j++) {
+							arr[i][j] = new Array();
+							for (var k = 0; k < Xsize; k++) {
+								arr[i][j][k] = 0;
+							}
+						}
+					}
+
+					for (var i = 0; i < Zsize; i++) {
+						for (var j = Ysize - 1; j >= 0; j--) {
+							for (var k = Xsize - 1; k >= 0; k--) {
+								arr[i][j][k] = volume.data[(i * Ysize + (Ysize - 1 - j)) * Xsize + (Xsize - 1 - k)];
+							}
+						}
+					}
+
+					// console.log(arr);
+				} );
+				
+				
+				// renderer
+				raycaster = new THREE.Raycaster();
+
+				renderer = new THREE.WebGLRenderer( { alpha: true } );
+				renderer.setPixelRatio( window.devicePixelRatio );
+				renderer.setSize( window.innerWidth, window.innerHeight );
+				container = document.createElement( 'div' );
+				document.body.appendChild( container );
+				container.appendChild( renderer.domElement );
+				controls = new THREE.TrackballControls( camera, renderer.domElement );
+				controls.rotateSpeed = 5.0;
+				controls.zoomSpeed = 5;
+				controls.panSpeed = 2;
+				controls.noZoom = false;
+				controls.noPan = false;
+				controls.staticMoving = true;
+				controls.dynamicDampingFactor = 0.3;
+				stats = new Stats();
+				container.appendChild( stats.dom );
+				var gui = new dat.GUI();
+				setupInset();
+
+
+				var sphereGeo = new THREE.SphereGeometry(16, 40, 40);
+				var sphereMat = new THREE.MeshLambertMaterial({
+					color:0x000000,
+					transparent:true,
+					opacity:0.3,
+					wireframe:false,
+				});
+				sphereMesh = new THREE.Mesh(sphereGeo, sphereMat);
+				sphereMesh.position.set(-10000, 0, 0);
+				scene.add(sphereMesh);
+
+				
+				document.addEventListener( 'mousemove', onDocumentMouseMove, false );
+				document.addEventListener( 'dblclick', dblclick, true );
+        		window.addEventListener( 'resize', onWindowResize, false );
+
+				
+				
+
+			}
+
+
+
+			function dblclick( event ) {
+				event.preventDefault();
+
+				var vector = new THREE.Vector3();//
+
+				vector.set(
+
+					( event.clientX / window.innerWidth ) * 2 - 1,
+
+					- ( event.clientY / window.innerHeight ) * 2 + 1,
+
+					0.5 );
+
+				vector.unproject( camera );
+
+				var raycaster = new THREE.Raycaster(camera.position, vector.sub(camera.position).normalize());
+
+				var intersects = raycaster.intersectObjects(scene.children);
+				 //   console.log("null");
+				if (intersects.length > 0) {
+
+					var selected = intersects[0];//
+
+					var Center = new Array((Math.round(selected.point.x + (Xsize - 1) / 2)), (Math.round(selected.point.y + (Ysize - 1) / 2)), (Math.round(selected.point.z + (Zsize - 1) / 2)));
+					console.log(Center);
+					console.log(Math.max((Center[0] - Ball.radius), 0));
+					console.log(Math.min((Center[0] + Ball.radius), Xsize));
+					console.log(Math.max((Center[1] - Ball.radius), 0));
+					console.log(Math.min((Center[1] + Ball.radius), Ysize));
+					console.log(Math.max((Center[2] - Ball.radius), 0));
+					console.log(Math.min((Center[2] + Ball.radius), Zsize));
+					
+
+
+
+					for (var i = Math.max((Center[2] - Ball.radius), 0); i <= Math.min((Center[2] + Ball.radius), Zsize); i++) {
+						for (var j = Math.max((Center[1] - Ball.radius), 0); j <= Math.min((Center[1] + Ball.radius), Ysize); j++) {
+							for (var k = Math.max((Center[0] - Ball.radius), 0); k <= Math.min((Center[0] + Ball.radius), Xsize); k++) {
+								if ( (Math.pow((i - Center[2]), 2) + Math.pow((j - Center[1]), 2) + Math.pow((k - Center[0]), 2)) <= Math.pow((Ball.radius), 2) && arr[i][j][k] <= TS.UTS && arr[i][j][k] >= TS.LTS ) {
+									console.log("X:"+k);
+									console.log("Y:"+j);
+									console.log("Z:"+i);
+									console.log("Page:"+pageNumber.page);
+
+
+									str += `${k + ','}`;
+									str += `${j + ','}`;
+									str += `${i + ','}`;
+									str += `${pageNumber.page}`;
+									str += `\n`;
+								}
+							}
+						}
+					}
+					// console.log("X:"+Center[0]);
+					// console.log("Y:"+Center[1]);
+					// console.log("Z:"+Center[2]);
+					// console.log("Page:"+pageNumber.page);
+					// console.log(TS.LTS);
+					// console.log(TS.UTS);
+
+					// // let str = `X,Y,Z\n`;
+					
+					// str += `${Center[0] + ','}`;
+					// str += `${Center[1] + ','}`;
+					// str += `${Center[2] + ','}`;
+					// str += `${pageNumber.page}`;
+					// str += `\n`;
+					
+					
+
+	    		}
+			}
+			
+			
+			
+			function onWindowResize() {
+				camera.aspect = window.innerWidth / window.innerHeight;
+				camera.updateProjectionMatrix();
+				renderer.setSize( window.innerWidth, window.innerHeight );
+				controls.handleResize();
+			}
+
+
+
+			function animate() {
+
+				requestAnimationFrame( animate );
+				controls.update();
+				stats.update();
+				render();
+			}
+
+
+
+			function render() {
+
+				// find intersections
+				raycaster.setFromCamera( mouse, camera );
+				var intersects = raycaster.intersectObjects( scene.children );
+				renderer.render( scene, camera );
+			}
+
+
+
+			function setupInset() {
+				var insetWidth = 150,
+					insetHeight = 150;
+				container2 = document.getElementById( 'inset' );
+				container2.width = insetWidth;
+				container2.height = insetHeight;
+				// renderer
+				renderer2 = new THREE.WebGLRenderer( { alpha: true } );
+				renderer2.setClearColor( 0x000000, 0 );
+				renderer2.setSize( insetWidth, insetHeight );
+				container2.appendChild( renderer2.domElement );
+				// scene
+				scene2 = new THREE.Scene();
+				// camera
+				camera2 = new THREE.PerspectiveCamera( 50, insetWidth / insetHeight, 1, 1000 );
+				camera2.up = camera.up; // important!
+				// axes
+				axes2 = new THREE.AxesHelper( 100 );
+				scene2.add( axes2 );
+			}
+
+
+
+			function onDocumentMouseMove(event){
+				event.preventDefault();						
+				
+				if (flag == 0){
+					sphereMesh.position.set(-10000, 0, 0);
+					flag = 1;
+				}
+				else if (flag == 1){
+					sphereMesh.position.set(-10000, 0, 0);
+					flag = 2;
+				}
+				else {
+					var vector = new THREE.Vector3();//
+
+					vector.set(
+
+						( event.clientX / window.innerWidth ) * 2 - 1,
+
+						- ( event.clientY / window.innerHeight ) * 2 + 1,
+
+						0.5 );
+
+					vector.unproject( camera );
+					
+					
+
+					var raycaster = new THREE.Raycaster(camera.position, vector.sub(camera.position).normalize());
+
+					var intersects = raycaster.intersectObjects(scene.children);
+					//   console.log("null");
+					if (intersects.length > 0) {					
+
+						var selected = intersects[0];
+
+						sphereMesh.position.set(selected.point.x, selected.point.y, selected.point.z);
+
+						flag = 0;
+					}
+				}
+			}
+			
+
+
+
+
+		</script>
+
+	</body>
+</html>
